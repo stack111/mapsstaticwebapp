@@ -4,6 +4,7 @@ using Microsoft.Azure.WebJobs;
 using Microsoft.Azure.WebJobs.Extensions.Http;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Configuration;
 
 namespace Azure.Maps
 {
@@ -12,12 +13,24 @@ namespace Azure.Maps
         [FunctionName("MapsFunc")]
         public static async Task<IActionResult> Run(
             [HttpTrigger(AuthorizationLevel.Function, "get", "post", Route = null)] HttpRequest req,
-            ILogger log)
+            ILogger log,  ExecutionContext context)
         {
             log.LogInformation("C# HTTP trigger function processed a request.");
+
+            var config = new ConfigurationBuilder()
+                    .SetBasePath(context.FunctionAppDirectory)
+                    
+                            // This gives you access to your application settings
+                            // in your local development environment:
+                    .AddJsonFile("local.settings.json", optional: true, reloadOnChange: true)
+
+                            // This is what actually gets you the application settings in Azure
+                    .AddEnvironmentVariables() 
+                    .Build();
+
             dynamic response = new 
             {
-                sasToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJlYWM4Njg0OS1lYzUyLWVlYmItNzc5MC0xNWQwOTM5ZDY5ODkiLCJyZWdpb25zIjoiW10iLCJtYXhSYXRlUGVyU2Vjb25kIjoiNTAwIiwib2lkIjoiMGY4NmE3ODEtYzdjMi00MjVmLWIyZGQtYmYyYTY2N2RlNmQ5IiwibmJmIjoxNjM1MTM2NTkxLCJleHAiOjE2NjY2NzI1OTEsImlhdCI6MTYzNTEzNjY0MSwiaXNzIjoiZTYzMzE2ZjMtYjQ1MC00MWNjLWFlZTQtYmM2NmU3OTU3ZTM0IiwiYXVkIjoiL3N1YnNjcmlwdGlvbnMvZDllZWY2NTAtYTg3Yy00MzNiLWEyMzYtMGVhZjMxNDBkOTIxL3Jlc291cmNlR3JvdXBzL21hcHMtZHN0YWNrLXRlbXBzYW1wbGUvcHJvdmlkZXJzL01pY3Jvc29mdC5NYXBzL2FjY291bnRzL21hcHMzbnVhYWpzaXpldnUifQ.t0ujrmoHNhrZxukCPR3tPuiuJQxv2VmI2uzxJoUzorE"
+                sasToken = config["sasToken"]
             };
             return new JsonResult(response);
         }
