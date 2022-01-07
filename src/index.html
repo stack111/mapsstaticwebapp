@@ -5,34 +5,172 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="styles.css">
-  <title>Vanilla JavaScript App</title>
+  <title>SAS Token Authentication</title>
   <link rel="stylesheet" href="https://us.atlas.microsoft.com/sdk/javascript/mapcontrol/2/atlas.min.css"
   type="text/css" />
-  <script src="https://us.atlas.microsoft.com/sdk/javascript/mapcontrol/2/atlas.min.js"></script>
+  <script src="atlas.min.js"></script>
+  <script src="atlas-service.min.js"></script>
+  <script>
+    var map, searchURL, datasource, popup;
+    function GetMap() {       
+        //atlas.setDomain('us.atlas.microsoft.com');
+        map = new atlas.Map("map", {
+            center: [-122.33, 47.64],
+            zoom: 12,
+            view: 'Auto',
+            //domain: 'us.atlas.microsoft.com',
+            authOptions: {
+                authType: "sas",
+                getToken: function (resolve, reject, map) { 
+                  fetch(`/api/mapsfunc`).then(r => r.json()).then(response => resolve(response.sasToken));
+                }
+            }
+        });
+
+        map.events.add("tokenacquired", function () {
+            console.log("token acquired");
+        });
+
+        var pipeline = atlas.service.MapsURL.newPipeline(new atlas.service.MapControlCredential(map));
+        searchURL = new atlas.service.SearchURL(pipeline);
+        map.events.add('ready', function () {
+                //Create a data source and add it to the map.
+                datasource = new atlas.source.DataSource();
+                map.sources.add(datasource);
+
+                //Add a layer for rendering the results as symbols.
+                var resultsLayer = new atlas.layer.SymbolLayer(datasource);
+                map.layers.add(resultsLayer);
+
+                //Create a popup but leave it closed so we can update it and display it later.
+                popup = new atlas.Popup({
+                    position: [0, 0],
+                    pixelOffset: [0, -18]
+                });
+
+                //Add a click event to the results symbol layer.
+                map.events.add('click', resultsLayer, symbolClicked);
+        });
+    }      
+    
+    function closePopup() {
+        popup.close();
+    }
+
+    function search(userLatitude, userLongitude) {
+        var query = document.getElementById('input').value;
+
+        //Remove any previous results from the map.
+        datasource.clear();
+
+        searchURL.searchFuzzy(atlas.service.Aborter.timeout(10000), query, {
+            lat: userLatitude,
+            lon: userLongitude,
+            radius: 100000,
+            view: 'Auto'
+        }).then(results => {
+            //Get the results in GeoJSON format and add it to the data source.
+            var data = results.geojson.getFeatures();  
+            datasource.add(data);
+         
+            //Set the camera to the bounds of the results.
+            map.setCamera({
+                bounds: data.bbox,
+                padding: 40
+            });
+        });
+    }
+    
+    function searchWithUserLocation() {
+        //Using the HTML5 geolocation API, request the users location from the browser, this will display a prompt to the user to share their location.
+        navigator.geolocation.getCurrentPosition(function (position) {
+            //Pass in the user location into the search.
+            search(position.coords.latitude, position.coords.longitude);
+        }, function (error) {
+            //If unable to get the users location, fall back to a search without their location information.
+            search();
+        });
+    }
+
+    function symbolClicked(e) {
+        //Make sure the event occurred on a point feature.
+        if (e.shapes && e.shapes.length > 0 && e.shapes[0].getType() === 'Point') {
+            var properties = e.shapes[0].getProperties();
+
+            //Using the properties, create HTML to fill the popup with useful information.
+            var html = ['<div style="padding:10px;"><span style="font-size:14px;font-weight:bold;">'];
+            var addressInTitle = false;
+
+            if (properties.type === 'POI' && properties.poi && properties.poi.name) {
+                html.push(properties.poi.name);
+            } else if (properties.address && properties.address.freeformAddress) {
+                html.push(properties.address.freeformAddress);
+                addressInTitle = true;
+            }
+
+            html.push('</span><br/>');
+
+            if (!addressInTitle && properties.address && properties.address.freeformAddress) {
+                html.push(properties.address.freeformAddress, '<br/>');
+            }
+
+            html.push('<b>Type: </b>', properties.type, '<br/>');
+
+            if (properties.entityType) {
+                html.push('<b>Entity Type: </b>', properties.entityType, '<br/>');
+            }
+
+            if (properties.type === 'POI' && properties.poi) {
+                if (properties.poi.phone) {
+                    html.push('<b>Phone: </b>', properties.poi.phone, '<br/>');
+                }
+
+                if (properties.poi.url) {
+                    html.push('<b>URL: </b>', properties.poi.url, '<br/>');
+                }
+
+                if (properties.poi.classifications) {
+                    html.push('<b>Classifications:</b><br/>');
+                    for (var i = 0; i < properties.poi.classifications.length; i++) {
+                        for (var j = 0; j < properties.poi.classifications[i].names.length; j++) {
+                            html.push(' - ', properties.poi.classifications[i].names[j].name, '<br/>');
+                        }
+                    }
+                }
+
+            }
+
+            html.push('</div>');
+
+            //Set the popup options.
+            popup.setOptions({
+                //Update the content of the popup.
+                content: html.join(''),
+
+                //Update the position of the popup with the pins coordinate.
+                position: e.shapes[0].getCoordinates()
+            });
+
+            //Open the popup.
+            popup.open(map);
+        }
+    }
+  </script>
 </head>
 
-<body>
-  <main>
-    <h1>Vanilla JavaScript App</h1>
-    <div id="map" style="width: 100%; height: 600px"></div>
-  </main>
-  <script>
-    (async function () {
-      atlas.setDomain('us.atlas.microsoft.com');
-      const { sasToken } = await (await fetch(`/api/mapsfunc`)).json();
-
-      // load the map after we fetch the sas token.
-      var map = new atlas.Map("map", {
-          center: [-122.33, 47.64],
-          zoom: 12,
-          language: "en-US",
-          authOptions: {
-              authType: "subscriptionKey",
-              subscriptionKey: sasToken
-          }
-      });      
-    }())
-  </script>
+<body onload="GetMap()">
+  <div id="map" style="position:relative;width:100%;min-width:290px;height:600px;"></div>
+  <div style="position:absolute;top:15px;left:15px;background-color:white;padding:10px;border-radius:10px;">
+      <input type="text" id="input" placeholder="Search..." />
+      <input type="button" onClick="search()" value="Search" />
+      <input type="button" onClick="searchWithUserLocation()" value="Search with User Location" />
+  </div>
+  <fieldset style="width:calc(100% - 30px);min-width:290px;margin-top:10px;">
+      <legend><h1 style="font-size:16px">Fuzzy Search with SAS Token Authentication and Services Module</h1></legend>
+      This sample shows how to use the Services module for Azure Maps to perform a fuzzy search for points of interests, address, and places. 
+      Providing user location information allows the search service choose results that are more local to the user. 
+      Click any results to see a popup with details for that result.
+  </fieldset>
 </body>
 
 </html>
